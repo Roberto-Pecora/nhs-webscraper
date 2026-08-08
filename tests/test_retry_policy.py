@@ -159,9 +159,10 @@ class TestCrawlTelemetry:
         assert backend.last_failed_pages == ("https://www.myplannedcare.nhs.uk/b/",)
 
     def test_failed_pages_reset_between_crawls(self, stubbed_crawl4ai):
-        backend = Crawl4AIBackend(
-            lambda: FlakyCrawler([[fail()], [ok()]]), retry_policy=POLICY
-        )
+        # One shared crawler so the script is consumed across both calls.
+        crawler = FlakyCrawler([[fail()], [ok()]])
+        backend = Crawl4AIBackend(lambda: crawler, retry_policy=POLICY)
+
         asyncio.run(backend.crawl("https://www.myplannedcare.nhs.uk/"))
         assert len(backend.last_failed_pages) == 1
 
