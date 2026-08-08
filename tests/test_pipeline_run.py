@@ -83,7 +83,14 @@ class TestSeedHandling:
             asyncio.run(run_pipeline(FakeBackend({}), []))
 
     def test_crawl_with_no_pages_yields_no_records(self):
+        # Preflight is disabled here: this test isolates crawl behaviour,
+        # and the empty backend has no canary page to probe. Preflight
+        # itself is covered by tests/test_preflight.py.
         result = asyncio.run(
-            run_pipeline(FakeBackend({}), [("https://www.myplannedcare.nhs.uk/x/", "London")])
+            run_pipeline(
+                FakeBackend({}),
+                [("https://www.myplannedcare.nhs.uk/x/", "London")],
+                preflight=False,
+            )
         )
         assert result.records == []
