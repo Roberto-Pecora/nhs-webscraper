@@ -51,7 +51,7 @@ class TestFixtures:
 class TestGoldenSchema:
     """The golden dataset is the extraction contract for later steps."""
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture()
     def records(self, load_golden):
         return load_golden("royal_berkshire_expected.json")
 

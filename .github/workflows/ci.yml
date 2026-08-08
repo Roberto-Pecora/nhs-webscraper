@@ -22,7 +22,9 @@ jobs:
       - name: Lint
         run: ruff check .
       - name: Unit and characterisation tests (offline)
-        run: pytest -m "not integration" --cov=src --cov-report=term-missing
+        # Coverage flags (--cov=src --cov-report=term-missing) are
+        # deliberately omitted until Step 2 adds executable code to src/.
+        run: pytest -m "not integration"
 
   integration-tests:
     # Opt-in only: requires FIRECRAWL_API_KEY and makes live API calls.
