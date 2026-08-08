@@ -13,6 +13,7 @@ from collections.abc import Sequence
 
 from nhs_scraper.io.csv_handler import read_records_csv, write_records_csv
 from nhs_scraper.pipeline.diff import diff_records, format_change
+from nhs_scraper.pipeline.preflight import LayoutDriftError
 from nhs_scraper.pipeline.run import run_pipeline
 from nhs_scraper.ports import CrawlBackend, CrawlOptions
 
@@ -57,6 +58,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", default="output/my_planned_care.csv")
     parser.add_argument("--limit", type=int, default=100, help="max pages per crawl")
     parser.add_argument("--max-depth", type=int, default=2, help="max crawl depth")
+    parser.add_argument(
+        "--no-preflight",
+        action="store_true",
+        help="skip the pre-flight layout probe (not recommended for scheduled runs)",
+    )
     return parser.parse_args(argv)
 
 
@@ -66,7 +72,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     seeds = args.seed or DEFAULT_SEEDS
     options = CrawlOptions(limit=args.limit, max_depth=args.max_depth)
 
-    result = asyncio.run(run_pipeline(backend, seeds, options))
+    try:
+        result = asyncio.run(
+            run_pipeline(backend, seeds, options, preflight=not args.no_preflight)
+        )
+    except LayoutDriftError as exc:
+        # Distinct exit code so scheduled workflows can alert on drift
+        # specifically rather than treating it as a generic failure.
+        print("layout drift detected — aborting before crawl:")
+        for failure in exc.failures:
+            print(f"  - {failure}")
+        return 2
+
     path = write_records_csv(result.records, args.output)
     print(f"run {result.run.run_id}: wrote {len(result.records)} records to {path}")
     return 0

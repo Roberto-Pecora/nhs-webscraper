@@ -1,4 +1,4 @@
-"""Pipeline orchestration: crawl -> extract -> normalise, with provenance.
+"""Pipeline orchestration: preflight -> crawl -> extract -> normalise.
 
 The orchestrator depends only on the ``CrawlBackend`` port: it can be
 driven by Crawl4AI in production and by an in-memory fake in tests.
@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from nhs_scraper.domain import CrawlRun, WaitingTimeRecord
 from nhs_scraper.pipeline.extract import extract_waiting_times
 from nhs_scraper.pipeline.normalise import normalise_records
+from nhs_scraper.pipeline.preflight import LayoutDriftError, probe_layout
 from nhs_scraper.ports import CrawlBackend, CrawlOptions
 
 logger = logging.getLogger(__name__)
@@ -34,16 +35,31 @@ async def run_pipeline(
     backend: CrawlBackend,
     seeds: Iterable[Seed],
     options: CrawlOptions | None = None,
+    *,
+    preflight: bool = True,
 ) -> PipelineResult:
-    """Crawl every seed, extract waiting times, and normalise the result.
+    """Probe the layout, then crawl every seed, extract and normalise.
+
+    With ``preflight=True`` (default) the first seed's page is scraped as
+    a canary and probed for the expected layout *before* any deep crawl:
+    a drifted site raises ``LayoutDriftError`` naming every failed
+    assertion, rather than producing a silently empty CSV.
 
     Extraction failures surface as absent records (the extractor's
-    contract), never as exceptions; backend failures propagate — a failed
-    crawl of a whole region is worth failing loudly.
+    contract); backend failures propagate — a failed crawl of a whole
+    region is worth failing loudly.
     """
     seeds = list(seeds)
     if not seeds:
         raise ValueError("at least one seed is required")
+
+    if preflight:
+        canary_url = seeds[0][0]
+        canary = await backend.scrape(canary_url)
+        probe = probe_layout(canary)
+        if not probe.ok:
+            raise LayoutDriftError(canary_url, probe.failures)
+        logger.info("preflight probe passed for %s", canary_url)
 
     run = CrawlRun(seed_url=seeds[0][0], backend=type(backend).__name__)
     records: list[WaitingTimeRecord] = []
