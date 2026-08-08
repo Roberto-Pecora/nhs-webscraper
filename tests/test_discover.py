@@ -17,6 +17,9 @@ from nhs_scraper.pipeline.discover import (
 TRUST_URL = "https://www.myplannedcare.nhs.uk/seast/royal-berkshire/"
 SEAST_URL = "https://www.myplannedcare.nhs.uk/seast/"
 
+#: Region slugs in homepage-fixture order, mirroring the live site.
+REGION_SLUGS = ("east", "london", "mids", "ney", "nwest", "seast", "swest")
+
 
 class FakeBackend:
     """Serves pages by URL for scrape(); records crawl calls."""
@@ -37,14 +40,20 @@ def page(html: str, url: str) -> Page:
     return Page(url=url, html=html)
 
 
+def empty_region_pages(*exclude: str) -> dict[str, Page]:
+    """Empty region pages for every slug except those excluded."""
+    return {
+        f"{BASE_URL}{slug}/": page("<html><body></body></html>", f"{BASE_URL}{slug}/")
+        for slug in REGION_SLUGS
+        if slug not in exclude
+    }
+
+
 class TestDiscoverRegionUrls:
     def test_homepage_fixture_yields_all_regions_in_order(self, load_fixture):
         urls = discover_region_urls(load_fixture("homepage.html"))
 
-        assert urls == [
-            f"{BASE_URL}{slug}/"
-            for slug in ("east", "london", "midlands", "neast", "nwest", "seast", "swest")
-        ]
+        assert urls == [f"{BASE_URL}{slug}/" for slug in REGION_SLUGS]
 
     def test_duplicates_external_and_utility_links_excluded(self, load_fixture):
         urls = discover_region_urls(load_fixture("homepage.html"))
@@ -87,12 +96,7 @@ class TestDiscoverSeeds:
         backend = FakeBackend(
             {
                 BASE_URL: page(load_fixture("homepage.html"), BASE_URL),
-                **{
-                    f"{BASE_URL}{slug}/": page(
-                        "<html><body></body></html>", f"{BASE_URL}{slug}/"
-                    )
-                    for slug in ("east", "london", "midlands", "neast", "nwest", "swest")
-                },
+                **empty_region_pages("seast"),
                 SEAST_URL: page(load_fixture("region_page_seast.html"), SEAST_URL),
             }
         )
@@ -116,14 +120,10 @@ class TestDiscoverSeeds:
             assert "no region links" in str(exc)
 
     def test_region_pages_without_trusts_raise(self, load_fixture):
-        empty = "<html><body>nothing here</body></html>"
         backend = FakeBackend(
             {
                 BASE_URL: page(load_fixture("homepage.html"), BASE_URL),
-                **{
-                    f"{BASE_URL}{slug}/": page(empty, f"{BASE_URL}{slug}/")
-                    for slug in ("east", "london", "midlands", "neast", "nwest", "seast", "swest")
-                },
+                **empty_region_pages(),
             }
         )
 
@@ -166,12 +166,7 @@ class TestCliDiscover:
                 BASE_URL: page(load_fixture("homepage.html"), BASE_URL),
                 SEAST_URL: page(load_fixture("region_page_seast.html"), SEAST_URL),
                 TRUST_URL: trust_page,
-                **{
-                    f"{BASE_URL}{slug}/": page(
-                        "<html><body></body></html>", f"{BASE_URL}{slug}/"
-                    )
-                    for slug in ("east", "london", "midlands", "neast", "nwest", "swest")
-                },
+                **empty_region_pages("seast"),
             }
         )
         # Oxford is discovered as a seed but has no fixture page; give the

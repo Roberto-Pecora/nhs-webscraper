@@ -21,7 +21,8 @@ from nhs_scraper.ports import CrawlBackend
 #: Default entry point for discovery.
 BASE_URL = "https://www.myplannedcare.nhs.uk/"
 
-#: Region path slugs -> display names threaded into extracted records.
+#: Region path slugs -> display names threaded into extracted records,
+#: verified against the live site (e.g. /ney/north-cumbria/).
 #: An allowlist (not "any single path segment") keeps utility pages like
 #: /find-my-hospital/ out of the region set. Unknown slugs fall back to
 #: the slug itself as the region name, so a newly added region still
@@ -29,8 +30,8 @@ BASE_URL = "https://www.myplannedcare.nhs.uk/"
 REGION_SLUG_TO_NAME: dict[str, str] = {
     "east": "East of England",
     "london": "London",
-    "midlands": "Midlands",
-    "neast": "North East",
+    "mids": "Midlands",
+    "ney": "North East and Yorkshire",
     "nwest": "North West",
     "seast": "South East",
     "swest": "South West",
