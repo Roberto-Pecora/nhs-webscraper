@@ -15,7 +15,7 @@ from nhs_scraper.io.csv_handler import read_records_csv, write_records_csv
 from nhs_scraper.pipeline.diff import diff_records, format_change
 from nhs_scraper.pipeline.preflight import LayoutDriftError
 from nhs_scraper.pipeline.run import run_pipeline
-from nhs_scraper.ports import CrawlBackend, CrawlOptions
+from nhs_scraper.ports import CrawlBackend, CrawlOptions, RetryPolicy
 
 DEFAULT_SEEDS: list[tuple[str, str]] = [
     ("https://www.myplannedcare.nhs.uk/seast/royal-berkshire/", "South East"),
@@ -32,12 +32,12 @@ def parse_seed(value: str) -> tuple[str, str]:
     return url.strip(), region.strip()
 
 
-def build_backend(name: str) -> CrawlBackend:
+def build_backend(name: str, retry_policy: RetryPolicy | None = None) -> CrawlBackend:
     """Construct a backend by name; imports are lazy on purpose."""
     if name == "crawl4ai":
         from nhs_scraper.backends.crawl4ai_backend import Crawl4AIBackend
 
-        return Crawl4AIBackend()
+        return Crawl4AIBackend(retry_policy=retry_policy)
     raise ValueError(f"unknown backend {name!r}")
 
 
@@ -59,6 +59,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=100, help="max pages per crawl")
     parser.add_argument("--max-depth", type=int, default=2, help="max crawl depth")
     parser.add_argument(
+        "--attempts",
+        type=int,
+        default=3,
+        help="max attempts per request for transient failures",
+    )
+    parser.add_argument(
+        "--backoff",
+        type=float,
+        default=2.0,
+        help="linear backoff base in seconds between retry attempts",
+    )
+    parser.add_argument(
         "--no-preflight",
         action="store_true",
         help="skip the pre-flight layout probe (not recommended for scheduled runs)",
@@ -68,7 +80,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    backend = build_backend(args.backend)
+    retry_policy = RetryPolicy(attempts=args.attempts, backoff_seconds=args.backoff)
+    backend = build_backend(args.backend, retry_policy=retry_policy)
     seeds = args.seed or DEFAULT_SEEDS
     options = CrawlOptions(limit=args.limit, max_depth=args.max_depth)
 
@@ -86,6 +99,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     path = write_records_csv(result.records, args.output)
     print(f"run {result.run.run_id}: wrote {len(result.records)} records to {path}")
+    if result.failed_pages:
+        print(f"warning: {len(result.failed_pages)} page(s) failed after retries:")
+        for url in result.failed_pages:
+            print(f"  - {url}")
     return 0
 
 

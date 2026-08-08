@@ -10,11 +10,12 @@ injected factory) raises ``RuntimeError`` with the remedy.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import asyncio
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 from nhs_scraper.domain import Page
-from nhs_scraper.ports import CrawlOptions
+from nhs_scraper.ports import CrawlOptions, RetryPolicy
 
 try:  # pragma: no cover - the real import is exercised by integration tests
     from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
@@ -34,9 +35,22 @@ class Crawl4AIBackend:
 
     ``crawler_factory`` may be injected for testing; it must be a callable
     producing an async context manager whose value exposes ``arun``.
+
+    ``retry_policy`` enables retries of *transient* failures (raised
+    transport errors and unsuccessful results). ``sleeper`` is a testing
+    hook for the backoff delay; production uses ``asyncio.sleep``.
+
+    ``last_failed_pages`` lists page URLs whose crawl results were
+    unsuccessful (after any retries) in the most recent ``crawl`` call —
+    failure telemetry the pipeline surfaces instead of dropping silently.
     """
 
-    def __init__(self, crawler_factory: Any | None = None) -> None:
+    def __init__(
+        self,
+        crawler_factory: Any | None = None,
+        retry_policy: RetryPolicy | None = None,
+        sleeper: Callable[[float], Awaitable[None]] | None = None,
+    ) -> None:
         if crawler_factory is None and AsyncWebCrawler is None:
             raise RuntimeError(
                 "crawl4ai is not installed; run `pip install nhs-webscraper[crawl]` "
@@ -45,11 +59,41 @@ class Crawl4AIBackend:
         self._crawler_factory = (
             crawler_factory if crawler_factory is not None else AsyncWebCrawler
         )
+        self._retry_policy = retry_policy
+        self._sleep = sleeper if sleeper is not None else asyncio.sleep
+        self.last_failed_pages: tuple[str, ...] = ()
+
+    async def _arun_with_retries(self, crawler: Any, url: str, config: Any) -> Any:
+        """Call ``arun``, retrying transient failures per the retry policy.
+
+        Without a policy exactly one attempt is made. Exhaustion raises
+        the last error: ``CrawlError`` for soft (unsuccessful-result)
+        failures, the original exception for transport errors.
+        """
+        policy = self._retry_policy or RetryPolicy(attempts=1)
+        last_error: Exception | None = None
+
+        for attempt in range(1, policy.attempts + 1):
+            try:
+                result = await crawler.arun(url=url, config=config)
+            except Exception as exc:  # transient network/browser errors
+                last_error = exc
+            else:
+                if getattr(result, "success", True):
+                    return result
+                last_error = CrawlError(
+                    f"crawl failed for {url}: "
+                    f"{getattr(result, 'error_message', 'unknown error')}"
+                )
+            if attempt < policy.attempts and policy.backoff_seconds:
+                await self._sleep(policy.backoff_seconds * attempt)
+
+        raise last_error  # type: ignore[misc]
 
     async def scrape(self, url: str) -> Page:
         """Fetch a single page and convert it to a domain ``Page``."""
         async with self._crawler_factory() as crawler:
-            result = await crawler.arun(url=url, config=CrawlerRunConfig())
+            result = await self._arun_with_retries(crawler, url, CrawlerRunConfig())
         return self._to_page(result)
 
     async def crawl(
@@ -57,8 +101,9 @@ class Crawl4AIBackend:
     ) -> Sequence[Page]:
         """Breadth-first crawl from ``seed``, bounded by ``options``.
 
-        Unsuccessful results are skipped rather than failing the crawl:
-        a single broken page must not lose the rest of a trust region.
+        Unsuccessful page results are skipped — a single broken page must
+        not lose the rest of a trust region — and their URLs are recorded
+        on ``last_failed_pages`` so the failure is visible, not silent.
         """
         options = options or CrawlOptions()
         config = CrawlerRunConfig(
@@ -68,7 +113,11 @@ class Crawl4AIBackend:
             )
         )
         async with self._crawler_factory() as crawler:
-            results = await crawler.arun(url=seed, config=config)
+            results = await self._arun_with_retries(crawler, seed, config)
+
+        self.last_failed_pages = tuple(
+            result.url for result in results if not getattr(result, "success", True)
+        )
         return [
             self._to_page(result)
             for result in results

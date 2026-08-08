@@ -138,7 +138,7 @@ class TestCliPreflight:
     ):
         drifted = make_page(load_fixture("trust_page_drifted.html"))
         backend = FakeBackend({TRUST_URL: [drifted]})
-        monkeypatch.setattr("nhs_scraper.cli.build_backend", lambda name: backend)
+        monkeypatch.setattr("nhs_scraper.cli.build_backend", lambda *a, **kw: backend)
 
         exit_code = cli_main(["--seed", f"{TRUST_URL}=South East"])
 
@@ -152,7 +152,7 @@ class TestCliPreflight:
     ):
         page = make_page(load_fixture("trust_page_royal_berkshire.html"))
         backend = FakeBackend({TRUST_URL: [page]})
-        monkeypatch.setattr("nhs_scraper.cli.build_backend", lambda name: backend)
+        monkeypatch.setattr("nhs_scraper.cli.build_backend", lambda *a, **kw: backend)
         output = tmp_path / "out.csv"
 
         exit_code = cli_main(
