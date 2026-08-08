@@ -1,0 +1,47 @@
+"""Ports: interfaces between the pure pipeline core and crawl backends.
+
+The port is async-native because the chosen backend (Crawl4AI) is built on
+async Playwright; faking a synchronous interface would fight the library.
+Tests drive the coroutines with ``asyncio.run`` so no pytest-asyncio
+dependency is required.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
+
+from nhs_scraper.domain import Page
+
+
+@dataclass(frozen=True)
+class CrawlOptions:
+    """Constraints applied to a multi-page crawl."""
+
+    limit: int = 100
+    max_depth: int = 2
+    allow_subdomains: bool = False
+
+    def __post_init__(self) -> None:
+        if self.limit < 1:
+            raise ValueError(f"limit must be >= 1, got {self.limit}")
+        if self.max_depth < 0:
+            raise ValueError(f"max_depth must be >= 0, got {self.max_depth}")
+
+
+@runtime_checkable
+class CrawlBackend(Protocol):
+    """Async contract every crawl backend must satisfy.
+
+    Implementations return domain ``Page`` objects; they never leak
+    backend-specific response types into the pipeline.
+    """
+
+    async def scrape(self, url: str) -> Page:
+        """Fetch a single page."""
+        ...
+
+    async def crawl(self, seed: str, options: CrawlOptions | None = None) -> Sequence[Page]:
+        """Fetch ``seed`` and linked pages, bounded by ``options``."""
+        ...
