@@ -3,6 +3,8 @@
 The keystone test proves the extractor reproduces the golden dataset
 exactly; the remaining tests pin the edge-case behaviour agreed in the
 domain model: missing data is a state (None / no record), never an error.
+The 2026 layout is covered by its own fixture and golden (added when the
+site drifted; the baseline fixture is unchanged per the conftest rule).
 """
 
 from __future__ import annotations
@@ -46,6 +48,39 @@ class TestGoldenExtraction:
         for record in records:
             assert record.source_url == TRUST_URL
             assert record.page_last_updated == date(2026, 1, 26)
+
+
+class TestLayout2026:
+    """The 2026 layout: holders + captions + n/a cells + new footer."""
+
+    def test_fixture_yields_exactly_the_2026_golden(self, load_fixture, load_golden):
+        page = make_page(load_fixture("trust_page_royal_berkshire_2026.html"))
+        records = extract_waiting_times(page, region=REGION)
+
+        expected = load_golden("royal_berkshire_2026_expected.json")
+        assert [record.to_dict() for record in records] == expected
+
+    def test_na_cells_yield_null_waits_not_absent_records(self, load_fixture):
+        page = make_page(load_fixture("trust_page_royal_berkshire_2026.html"))
+        records = extract_waiting_times(page, region=REGION)
+
+        first_outpatient = [
+            r for r in records if r.metric is Metric.FIRST_OUTPATIENT_APPOINTMENT
+        ]
+        assert len(first_outpatient) == 2
+        assert all(r.average_wait_weeks is None for r in first_outpatient)
+
+    def test_unavailable_specialty_skipped(self, load_fixture):
+        page = make_page(load_fixture("trust_page_royal_berkshire_2026.html"))
+        records = extract_waiting_times(page, region=REGION)
+
+        assert "Paediatric Surgery" not in {r.specialty for r in records}
+
+    def test_footer_date_parsed(self, load_fixture):
+        page = make_page(load_fixture("trust_page_royal_berkshire_2026.html"))
+        records = extract_waiting_times(page, region=REGION)
+
+        assert all(r.page_last_updated == date(2026, 8, 7) for r in records)
 
 
 class TestEdgeCases:

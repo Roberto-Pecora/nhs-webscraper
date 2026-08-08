@@ -1,8 +1,8 @@
 """Pre-flight layout probe: detect site structure drift before crawling.
 
 Runs the structural signals the extractor depends on against a single
-canary page, then the extractor itself end-to-end. Far cheaper and more
-diagnosable than discovering an empty CSV after a full crawl.
+canary page, then the extractor itself end-to-end. Both the legacy and
+the 2026 layouts are recognised; a page matching neither fails.
 """
 
 from __future__ import annotations
@@ -15,9 +15,10 @@ from bs4 import BeautifulSoup
 from nhs_scraper.domain import Page
 from nhs_scraper.pipeline.extract import extract_waiting_times
 
-_KNOWN_METRIC_HEADINGS = {"first outpatient appointment", "treatment"}
-_LAST_UPDATED_PATTERN = re.compile(
-    r"page last updated:\s*\d{2}/\d{2}/\d{4}", re.IGNORECASE
+_KNOWN_METRIC_LABELS = {"first outpatient appointment", "treatment"}
+_LEGACY_FOOTER = re.compile(r"page last updated:\s*\d{2}/\d{2}/\d{4}", re.IGNORECASE)
+_2026_FOOTER = re.compile(
+    r"this page was last updated on\s+\d{1,2}\s+\w+\s+\d{4}", re.IGNORECASE
 )
 
 
@@ -30,7 +31,7 @@ class LayoutProbeResult:
 
 
 class LayoutDriftError(RuntimeError):
-    """Raised when the canary page no longer matches the expected layout."""
+    """Raised when the canary page no longer matches any known layout."""
 
     def __init__(self, url: str, failures: tuple[str, ...]) -> None:
         self.url = url
@@ -45,29 +46,37 @@ def _structural_failures(page: Page) -> list[str]:
 
     if not soup.find("h1"):
         failures.append("no <h1> provider heading found")
-    if not soup.find_all("section", class_="specialty"):
-        failures.append("no <section class='specialty'> blocks found")
+
+    if not (
+        soup.find_all("section", class_="specialty")
+        or soup.find_all("div", class_="inner_details_holder")
+    ):
+        failures.append("no recognised specialty blocks found")
 
     headings = {h.get_text(strip=True).lower() for h in soup.find_all("h4")}
-    if not headings & _KNOWN_METRIC_HEADINGS:
-        failures.append("no recognised metric headings (h4) found")
-
-    has_waiting_table = any(
-        (row := table.find("tr")) is not None
-        and "average waiting time" in row.get_text(strip=True).lower()
+    captions = {
+        caption.get_text(strip=True).lower()
         for table in soup.find_all("table")
-    )
-    if not has_waiting_table:
+        if (caption := table.find("caption")) is not None
+    }
+    if not (headings | captions) & _KNOWN_METRIC_LABELS:
+        failures.append("no recognised metric labels found")
+
+    if not any(
+        "average waiting time" in th.get_text(strip=True).lower()
+        for th in soup.find_all("th")
+    ):
         failures.append("no waiting-time tables with 'Average waiting time' header found")
 
-    if not _LAST_UPDATED_PATTERN.search(soup.get_text(" ", strip=True)):
-        failures.append("no 'Page last updated: DD/MM/YYYY' footer found")
+    text = soup.get_text(" ", strip=True)
+    if not (_LEGACY_FOOTER.search(text) or _2026_FOOTER.search(text)):
+        failures.append("no recognised last-updated footer found")
 
     return failures
 
 
 def probe_layout(page: Page) -> LayoutProbeResult:
-    """Probe one canary page for the layout the extractor depends on.
+    """Probe one canary page for a layout the extractor understands.
 
     Structural checks run first; only when they all pass is the extractor
     run end-to-end — a structurally valid page that still yields no

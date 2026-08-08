@@ -4,14 +4,12 @@ No I/O happens here: the function consumes an immutable ``Page`` and
 returns validated ``WaitingTimeRecord`` objects. Behaviour is pinned by
 the characterisation fixtures and golden dataset.
 
-Expected page shape (My Planned Care trust page):
-
-- ``h1`` — provider (trust) name
-- ``section.specialty`` blocks, each with an ``h3`` specialty name
-- within a section, ``h4`` headings ("First Outpatient Appointment" /
-  "Treatment") each followed by a table whose data row holds
-  "N weeks" values for average and 8-in-10 waits
-- footer text "Page last updated: DD/MM/YYYY"
+Two layouts are supported. The legacy layout (pre-2026, kept as the
+characterisation baseline) uses ``section.specialty`` blocks with ``h4``
+metric headings. The 2026 layout uses ``div.inner_details_holder`` blocks
+with table ``<caption>`` metric labels and ``n/a`` cells; its footer
+reads "This page was last updated on D Month YYYY". New-layout extraction
+is tried first; a page with no 2026 holders falls back to legacy.
 """
 
 from __future__ import annotations
@@ -19,18 +17,19 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup
 
 from nhs_scraper.domain import Metric, Page, WaitingTimeRecord
 
-_METRIC_BY_HEADING = {
+_METRIC_BY_LABEL = {
     "first outpatient appointment": Metric.FIRST_OUTPATIENT_APPOINTMENT,
     "treatment": Metric.TREATMENT,
 }
 
 _WEEKS_PATTERN = re.compile(r"(\d+)\s*weeks?", re.IGNORECASE)
-_LAST_UPDATED_PATTERN = re.compile(
-    r"page last updated:\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE
+_LEGACY_FOOTER = re.compile(r"page last updated:\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
+_2026_FOOTER = re.compile(
+    r"this page was last updated on\s+(\d{1,2}\s+\w+\s+\d{4})", re.IGNORECASE
 )
 
 
@@ -41,10 +40,12 @@ def _parse_weeks(cell_text: str) -> int | None:
 
 
 def _parse_page_last_updated(soup: BeautifulSoup) -> date | None:
-    match = _LAST_UPDATED_PATTERN.search(soup.get_text(" ", strip=True))
-    if not match:
-        return None
-    return datetime.strptime(match.group(1), "%d/%m/%Y").date()
+    text = soup.get_text(" ", strip=True)
+    if match := _LEGACY_FOOTER.search(text):
+        return datetime.strptime(match.group(1), "%d/%m/%Y").date()
+    if match := _2026_FOOTER.search(text):
+        return datetime.strptime(match.group(1), "%d %B %Y").date()
+    return None
 
 
 def _provider_name(soup: BeautifulSoup) -> str | None:
@@ -52,14 +53,104 @@ def _provider_name(soup: BeautifulSoup) -> str | None:
     return heading.get_text(strip=True) if heading else None
 
 
-def _table_values(table: Tag) -> tuple[int | None, int | None]:
-    rows = table.find_all("tr")
-    if len(rows) < 2:
-        return None, None
-    cells = [c.get_text(strip=True) for c in rows[1].find_all(["td", "th"])]
-    average = _parse_weeks(cells[0]) if cells else None
-    within = _parse_weeks(cells[1]) if len(cells) > 1 else None
-    return average, within
+def _make_record(
+    *, region, provider, specialty, source_url, metric, average, within, updated
+) -> WaitingTimeRecord:
+    return WaitingTimeRecord(
+        region=region,
+        provider=provider,
+        specialty=specialty,
+        source_url=source_url,
+        metric=metric,
+        average_wait_weeks=average,
+        patients_seen_within_weeks=within,
+        page_last_updated=updated,
+    )
+
+
+def _extract_2026(
+    soup: BeautifulSoup, *, region, provider, source_url, updated
+) -> list[WaitingTimeRecord]:
+    """Extract from the 2026 ``div.inner_details_holder`` layout."""
+    records: list[WaitingTimeRecord] = []
+    for holder in soup.find_all("div", class_="inner_details_holder"):
+        heading = holder.find("h3", class_="nhsblue-text0")
+        if heading is None:
+            continue
+        specialty = heading.get_text(strip=True).removesuffix(" - Waiting Times")
+
+        for table in holder.find_all("table", class_="waiting-times-data"):
+            caption = table.find("caption")
+            metric = (
+                _METRIC_BY_LABEL.get(caption.get_text(strip=True).lower())
+                if caption
+                else None
+            )
+            if metric is None:
+                continue
+            average = within = None
+            for row in table.find_all("tr"):
+                th, td = row.find("th"), row.find("td")
+                if th is None or td is None:
+                    continue
+                label = th.get_text(strip=True).lower()
+                value = td.get_text(strip=True)
+                if "average waiting time" in label:
+                    average = _parse_weeks(value)
+                elif "8 in 10 patients" in label:
+                    within = _parse_weeks(value)
+            records.append(
+                _make_record(
+                    region=region,
+                    provider=provider,
+                    specialty=specialty,
+                    source_url=source_url,
+                    metric=metric,
+                    average=average,
+                    within=within,
+                    updated=updated,
+                )
+            )
+    return records
+
+
+def _extract_legacy(
+    soup: BeautifulSoup, *, region, provider, source_url, updated
+) -> list[WaitingTimeRecord]:
+    """Extract from the legacy ``section.specialty`` layout."""
+    records: list[WaitingTimeRecord] = []
+    for section in soup.find_all("section", class_="specialty"):
+        specialty_tag = section.find("h3")
+        if specialty_tag is None:
+            continue
+        specialty = specialty_tag.get_text(strip=True)
+
+        for heading in section.find_all("h4"):
+            metric = _METRIC_BY_LABEL.get(heading.get_text(strip=True).lower())
+            table = heading.find_next_sibling("table")
+            if metric is None or table is None:
+                continue
+            rows = table.find_all("tr")
+            cells = (
+                [c.get_text(strip=True) for c in rows[1].find_all(["td", "th"])]
+                if len(rows) > 1
+                else []
+            )
+            average = _parse_weeks(cells[0]) if cells else None
+            within = _parse_weeks(cells[1]) if len(cells) > 1 else None
+            records.append(
+                _make_record(
+                    region=region,
+                    provider=provider,
+                    specialty=specialty,
+                    source_url=source_url,
+                    metric=metric,
+                    average=average,
+                    within=within,
+                    updated=updated,
+                )
+            )
+    return records
 
 
 def extract_waiting_times(page: Page, *, region: str) -> list[WaitingTimeRecord]:
@@ -74,32 +165,11 @@ def extract_waiting_times(page: Page, *, region: str) -> list[WaitingTimeRecord]
     if provider is None:
         return []
 
-    last_updated = _parse_page_last_updated(soup)
-    records: list[WaitingTimeRecord] = []
-
-    for section in soup.find_all("section", class_="specialty"):
-        specialty_tag = section.find("h3")
-        if specialty_tag is None:
-            continue
-        specialty = specialty_tag.get_text(strip=True)
-
-        for heading in section.find_all("h4"):
-            metric = _METRIC_BY_HEADING.get(heading.get_text(strip=True).lower())
-            table = heading.find_next_sibling("table")
-            if metric is None or table is None:
-                continue
-            average, within = _table_values(table)
-            records.append(
-                WaitingTimeRecord(
-                    region=region,
-                    provider=provider,
-                    specialty=specialty,
-                    source_url=page.url,
-                    metric=metric,
-                    average_wait_weeks=average,
-                    patients_seen_within_weeks=within,
-                    page_last_updated=last_updated,
-                )
-            )
-
-    return records
+    updated = _parse_page_last_updated(soup)
+    context = dict(
+        region=region,
+        provider=provider,
+        source_url=page.url,
+        updated=updated,
+    )
+    return _extract_2026(soup, **context) or _extract_legacy(soup, **context)
