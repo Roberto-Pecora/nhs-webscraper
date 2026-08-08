@@ -24,6 +24,9 @@ crawl = [
     "crawl4ai>=0.7",
 ]
 
+[project.scripts]
+nhs-scraper = "nhs_scraper.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
