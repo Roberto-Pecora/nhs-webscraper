@@ -201,11 +201,14 @@ class TestCliDiscover:
     def test_discover_full_run_accumulates_distinct_records(
         self, monkeypatch, tmp_path, load_fixture, capsys
     ):
-        # Oxford serves a variant with different waiting times, so its 4
-        # records are distinct from Royal Berkshire's and both survive.
+        # Two different URLs serving identical HTML dedupe to the same
+        # records, so the provider in the dedupe key comes from the page
+        # <h1>. Prepending text inside the h1 tag changes the provider —
+        # and thus the dedupe key — without touching any parsed numbers.
         oxford_html = load_fixture("trust_page_royal_berkshire.html").replace(
-            "weeks</td>", " weeks longer</td>"
+            "<h1>", "<h1>Oxford University Hospitals — ", 1
         )
+        assert oxford_html != load_fixture("trust_page_royal_berkshire.html")
         monkeypatch.setattr(
             "nhs_scraper.cli.build_backend",
             lambda *a, **kw: discover_backend(load_fixture, oxford_html),
