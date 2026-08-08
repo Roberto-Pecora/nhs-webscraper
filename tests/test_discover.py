@@ -67,12 +67,13 @@ class TestDiscoverTrustSeeds:
         ]
 
     def test_traps_are_excluded(self, load_fixture):
-        urls = [u for u, _ in discover_trust_seeds(SEAST_URL, load_fixture("region_page_seast.html"))]
+        seeds = discover_trust_seeds(SEAST_URL, load_fixture("region_page_seast.html"))
+        urls = [url for url, _ in seeds]
 
-        assert urls.count(TRUST_URL) == 1          # duplicate collapsed
-        assert SEAST_URL not in urls               # self link
-        assert not any("cardiology" in u for u in urls)   # too deep
-        assert not any("/london/" in u for u in urls)     # wrong region
+        assert urls.count(TRUST_URL) == 1                # duplicate collapsed
+        assert SEAST_URL not in urls                     # self link
+        assert not any("cardiology" in u for u in urls)  # too deep
+        assert not any("/london/" in u for u in urls)    # wrong region
 
     def test_unknown_slug_falls_back_to_slug_as_region(self):
         seeds = discover_trust_seeds(
@@ -87,7 +88,9 @@ class TestDiscoverSeeds:
             {
                 BASE_URL: page(load_fixture("homepage.html"), BASE_URL),
                 **{
-                    f"{BASE_URL}{slug}/": page("<html><body></body></html>", f"{BASE_URL}{slug}/")
+                    f"{BASE_URL}{slug}/": page(
+                        "<html><body></body></html>", f"{BASE_URL}{slug}/"
+                    )
                     for slug in ("east", "london", "midlands", "neast", "nwest", "swest")
                 },
                 SEAST_URL: page(load_fixture("region_page_seast.html"), SEAST_URL),
@@ -102,7 +105,9 @@ class TestDiscoverSeeds:
         ]
 
     def test_empty_homepage_raises(self):
-        backend = FakeBackend({BASE_URL: page("<html><body>no links</body></html>", BASE_URL)})
+        backend = FakeBackend(
+            {BASE_URL: page("<html><body>no links</body></html>", BASE_URL)}
+        )
 
         try:
             asyncio.run(discover_seeds(backend))
@@ -162,7 +167,9 @@ class TestCliDiscover:
                 SEAST_URL: page(load_fixture("region_page_seast.html"), SEAST_URL),
                 TRUST_URL: trust_page,
                 **{
-                    f"{BASE_URL}{slug}/": page("<html><body></body></html>", f"{BASE_URL}{slug}/")
+                    f"{BASE_URL}{slug}/": page(
+                        "<html><body></body></html>", f"{BASE_URL}{slug}/"
+                    )
                     for slug in ("east", "london", "midlands", "neast", "nwest", "swest")
                 },
             }
