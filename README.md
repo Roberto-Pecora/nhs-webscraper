@@ -5,12 +5,7 @@ data from the [NHS My Planned Care](https://www.myplannedcare.nhs.uk/)
 platform.
 
 This repository is a ground-up rebuild of the original Selenium-coupled
-[`nhs_webscraper`](https://github.com/Hydaspex/nhs_webscraper). The crawl
-backend is pluggable — the reference implementation targets
-[Crawl4AI](https://docs.crawl4ai.com/) (async, self-hosted, no API key),
-with a legacy Selenium compatibility adapter retained for parity testing —
-whilst parsing, normalisation and persistence are pure, offline-testable
-units.
+`nhs_webscraper` The crawl backend is pluggable — the reference implementation targets[Crawl4AI](https://docs.crawl4ai.com/) (async, self-hosted, no API key),with a legacy Selenium compatibility adapter retained for parity testing — whilst parsing, normalisation and persistence are pure, offline-testable units.
 
 ## Design principles
 
@@ -37,14 +32,6 @@ tests/
   golden/         # expected extraction output per fixture
 ```
 
-## Roadmap (one PR per increment)
-
-1. Characterisation baseline — fixtures, golden dataset, schema tests
-2. Domain models with validation tests
-3. `CrawlBackend` port + pure extraction against fixtures
-4. Crawl4AI backend with mocked unit tests and contract tests
-5. Pipeline orchestration + CSV output with fake-backend integration tests
-6. Legacy-vs-modern parity diff tooling; removal of Selenium
 
 ## Development
 
