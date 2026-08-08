@@ -20,6 +20,9 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.6",
 ]
+crawl = [
+    "crawl4ai>=0.7",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -28,7 +31,7 @@ where = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
 markers = [
-    "integration: tests requiring network access or external API keys (deselected by default in CI unit job)",
+    "integration: tests requiring network access or a real browser (deselected by default in CI unit job)",
 ]
 
 [tool.ruff]

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   unit-tests:
@@ -25,8 +26,8 @@ jobs:
         run: pytest -m "not integration" --cov=src --cov-report=term-missing
 
   integration-tests:
-    # Opt-in only. Crawl4AI runs Playwright in-process, so no API key is
-    # required; the backend and its browser setup land in a follow-up PR.
+    # Opt-in only: installs Crawl4AI and Playwright Chromium, then makes
+    # live requests to My Planned Care. No API key required.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
@@ -35,6 +36,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e .[dev]
+      - name: Install package with dev and crawl dependencies
+        run: pip install -e .[dev,crawl]
+      - name: Install Playwright browsers
+        run: crawl4ai-setup
       - name: Live integration tests
         run: pytest -m integration
