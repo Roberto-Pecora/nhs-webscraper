@@ -20,14 +20,16 @@ _METRIC_ORDER = {
 def normalise_records(records: Iterable[WaitingTimeRecord]) -> list[WaitingTimeRecord]:
     """Dedupe on identity fields and sort deterministically.
 
-    Identity is (provider, specialty, metric): the first occurrence wins,
-    so callers should order sources by trustworthiness. Sort key is
+    Identity is (region, provider, specialty, metric): region is part of
+    identity so the same trust surfaced under two region seeds remains
+    two records. The first occurrence wins within an identity, so callers
+    should order sources by trustworthiness. Sort key is
     (region, provider, specialty, metric) with outpatient before treatment.
     """
-    seen: set[tuple[str, str, Metric]] = set()
+    seen: set[tuple[str, str, str, Metric]] = set()
     unique: list[WaitingTimeRecord] = []
     for record in records:
-        key = (record.provider, record.specialty, record.metric)
+        key = (record.region, record.provider, record.specialty, record.metric)
         if key in seen:
             continue
         seen.add(key)

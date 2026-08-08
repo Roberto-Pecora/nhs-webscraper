@@ -37,6 +37,17 @@ class TestDedupe:
 
         assert len(normalise_records([foa, treatment])) == 2
 
+    def test_same_provider_under_two_regions_is_not_deduped(self):
+        # Regression for the multi-seed aggregation failure: region is
+        # part of the dedupe identity.
+        south_east = rec("Trust B", "Cardiology", Metric.TREATMENT, region="South East")
+        london = rec("Trust B", "Cardiology", Metric.TREATMENT, region="London")
+
+        result = normalise_records([south_east, london])
+
+        assert len(result) == 2
+        assert {r.region for r in result} == {"South East", "London"}
+
     def test_empty_input(self):
         assert normalise_records([]) == []
 
