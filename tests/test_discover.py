@@ -15,6 +15,7 @@ from nhs_scraper.pipeline.discover import (
 )
 
 TRUST_URL = "https://www.myplannedcare.nhs.uk/seast/royal-berkshire/"
+OXFORD_URL = "https://www.myplannedcare.nhs.uk/seast/oxford-university/"
 SEAST_URL = "https://www.myplannedcare.nhs.uk/seast/"
 
 #: Region slugs in homepage-fixture order, mirroring the live site.
@@ -49,6 +50,26 @@ def empty_region_pages(*exclude: str) -> dict[str, Page]:
     }
 
 
+def discover_backend(load_fixture, oxford_html: str | None = None) -> FakeBackend:
+    """Backend wired for a full --discover run over the fixtures.
+
+    Oxford defaults to serving the same Royal Berkshire HTML — the
+    dedupe-across-seeds scenario.
+    """
+    trust_html = load_fixture("trust_page_royal_berkshire.html")
+    return FakeBackend(
+        {
+            BASE_URL: page(load_fixture("homepage.html"), BASE_URL),
+            SEAST_URL: page(load_fixture("region_page_seast.html"), SEAST_URL),
+            TRUST_URL: page(trust_html, TRUST_URL),
+            OXFORD_URL: page(
+                oxford_html if oxford_html is not None else trust_html, OXFORD_URL
+            ),
+            **empty_region_pages("seast"),
+        }
+    )
+
+
 class TestDiscoverRegionUrls:
     def test_homepage_fixture_yields_all_regions_in_order(self, load_fixture):
         urls = discover_region_urls(load_fixture("homepage.html"))
@@ -72,7 +93,7 @@ class TestDiscoverTrustSeeds:
 
         assert seeds == [
             (TRUST_URL, "South East"),
-            ("https://www.myplannedcare.nhs.uk/seast/oxford-university/", "South East"),
+            (OXFORD_URL, "South East"),
         ]
 
     def test_traps_are_excluded(self, load_fixture):
@@ -105,7 +126,7 @@ class TestDiscoverSeeds:
 
         assert seeds == [
             (TRUST_URL, "South East"),
-            ("https://www.myplannedcare.nhs.uk/seast/oxford-university/", "South East"),
+            (OXFORD_URL, "South East"),
         ]
 
     def test_empty_homepage_raises(self):
@@ -157,25 +178,16 @@ class TestCliDiscover:
         assert "no region links" in out
         assert backend.crawl_calls == []  # never fell through to a crawl
 
-    def test_discover_full_run_writes_csv(
+    def test_discover_full_run_dedupes_identical_records(
         self, monkeypatch, tmp_path, load_fixture, capsys
     ):
-        trust_page = page(load_fixture("trust_page_royal_berkshire.html"), TRUST_URL)
-        backend = FakeBackend(
-            {
-                BASE_URL: page(load_fixture("homepage.html"), BASE_URL),
-                SEAST_URL: page(load_fixture("region_page_seast.html"), SEAST_URL),
-                TRUST_URL: trust_page,
-                **empty_region_pages("seast"),
-            }
+        # Both seeds serve the same fixture HTML: the second trust's 4
+        # records are exact duplicates and normalise_records collapses
+        # them — dedupe across seeds is the intended behaviour.
+        monkeypatch.setattr(
+            "nhs_scraper.cli.build_backend",
+            lambda *a, **kw: discover_backend(load_fixture),
         )
-        # Oxford is discovered as a seed but has no fixture page; give the
-        # crawl the royal-berkshire page content under that URL too.
-        backend._pages["https://www.myplannedcare.nhs.uk/seast/oxford-university/"] = page(
-            load_fixture("trust_page_royal_berkshire.html"),
-            "https://www.myplannedcare.nhs.uk/seast/oxford-university/",
-        )
-        monkeypatch.setattr("nhs_scraper.cli.build_backend", lambda *a, **kw: backend)
         output = tmp_path / "full.csv"
 
         exit_code = cli_main(["--discover", "--output", str(output)])
@@ -183,5 +195,25 @@ class TestCliDiscover:
         assert exit_code == 0
         out = capsys.readouterr().out
         assert "discovered 2 trust seeds" in out
-        assert "8 records" in out  # 4 golden records x 2 discovered trusts
+        assert "4 records" in out  # 4 golden records, deduped across seeds
+        assert output.exists()
+
+    def test_discover_full_run_accumulates_distinct_records(
+        self, monkeypatch, tmp_path, load_fixture, capsys
+    ):
+        # Oxford serves a variant with different waiting times, so its 4
+        # records are distinct from Royal Berkshire's and both survive.
+        oxford_html = load_fixture("trust_page_royal_berkshire.html").replace(
+            "weeks</td>", " weeks longer</td>"
+        )
+        monkeypatch.setattr(
+            "nhs_scraper.cli.build_backend",
+            lambda *a, **kw: discover_backend(load_fixture, oxford_html),
+        )
+        output = tmp_path / "full.csv"
+
+        exit_code = cli_main(["--discover", "--output", str(output)])
+
+        assert exit_code == 0
+        assert "8 records" in capsys.readouterr().out
         assert output.exists()
