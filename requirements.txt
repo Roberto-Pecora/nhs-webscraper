@@ -1,0 +1,6 @@
+# Pinned convenience file for environments that do not read pyproject.toml.
+beautifulsoup4>=4.12
+pandas>=2.2
+pytest>=8.0
+pytest-cov>=5.0
+ruff>=0.6
