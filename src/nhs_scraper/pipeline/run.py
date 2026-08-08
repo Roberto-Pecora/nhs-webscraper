@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from nhs_scraper.domain import CrawlRun, WaitingTimeRecord
 from nhs_scraper.pipeline.extract import extract_waiting_times

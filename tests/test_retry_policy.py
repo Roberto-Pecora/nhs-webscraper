@@ -16,7 +16,7 @@ import nhs_scraper.backends.crawl4ai_backend as backend_module
 from nhs_scraper.backends.crawl4ai_backend import Crawl4AIBackend, CrawlError
 from nhs_scraper.domain import Page
 from nhs_scraper.pipeline.run import run_pipeline
-from nhs_scraper.ports import CrawlOptions, RetryPolicy
+from nhs_scraper.ports import RetryPolicy
 
 
 class FlakyCrawler:
@@ -101,7 +101,7 @@ class TestScrapeRetries:
         crawler = FlakyCrawler([fail(), ok()])
         backend = Crawl4AIBackend(lambda: crawler, retry_policy=POLICY)
 
-        page = asyncio.run(backend.scrape("https://x/"))
+        asyncio.run(backend.scrape("https://x/"))
         assert crawler.attempts == 2
 
     def test_exhaustion_of_soft_failures_raises_crawl_error(self, stubbed_crawl4ai):
