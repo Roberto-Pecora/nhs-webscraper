@@ -26,6 +26,7 @@ crawl = [
 
 [project.scripts]
 nhs-scraper = "nhs_scraper.cli:main"
+nhs-scraper-diff = "nhs_scraper.cli:diff_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
