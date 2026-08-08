@@ -1,66 +1,137 @@
-"""Offline tests for the extractor against the fixture and edge cases."""
+"""Pure-extraction tests, run against the characterisation fixtures.
+
+The keystone test proves the extractor reproduces the golden dataset
+exactly; the remaining tests pin the edge-case behaviour agreed in the
+domain model: missing data is a state (None / no record), never an error.
+The 2026 layout is covered by its own fixture and golden (added when the
+site drifted; the baseline fixture is unchanged per the conftest rule).
+"""
 
 from __future__ import annotations
 
-from nhs_scraper.domain import Page
+from datetime import date
+
+from nhs_scraper.domain import Metric, Page
 from nhs_scraper.pipeline.extract import extract_waiting_times
 
+REGION = "South East"
 TRUST_URL = "https://www.myplannedcare.nhs.uk/seast/royal-berkshire/"
 
 
-def page(html: str) -> Page:
-    return Page(url=TRUST_URL, html=html)
+def make_page(html: str, url: str = TRUST_URL) -> Page:
+    return Page(url=url, html=html)
 
 
 class TestGoldenExtraction:
-    def test_fixture_yields_golden_records(self, load_fixture, load_golden):
-        records = extract_waiting_times(
-            page(load_fixture("trust_page_royal_berkshire.html")), region="South East"
-        )
+    def test_fixture_yields_exactly_the_golden_records(self, load_fixture, load_golden):
+        page = make_page(load_fixture("trust_page_royal_berkshire.html"))
+        records = extract_waiting_times(page, region=REGION)
 
-        assert [r.to_dict() for r in records] == load_golden("royal_berkshire_expected.json")
+        expected = load_golden("royal_berkshire_expected.json")
+        assert [record.to_dict() for record in records] == expected
 
-    def test_first_outpatient_na_rows_skipped(self, load_fixture):
-        records = extract_waiting_times(
-            page(load_fixture("trust_page_royal_berkshire.html")), region="South East"
-        )
+    def test_metrics_parse_in_document_order(self, load_fixture):
+        page = make_page(load_fixture("trust_page_royal_berkshire.html"))
+        records = extract_waiting_times(page, region=REGION)
 
-        assert all(r.metric == "treatment" for r in records)
-        assert len(records) == 2  # Breast + Cardiology; first-outpatient n/a
+        assert [r.metric for r in records] == [
+            Metric.FIRST_OUTPATIENT_APPOINTMENT,
+            Metric.TREATMENT,
+            Metric.FIRST_OUTPATIENT_APPOINTMENT,
+            Metric.TREATMENT,
+        ]
+
+    def test_records_carry_provenance(self, load_fixture):
+        page = make_page(load_fixture("trust_page_royal_berkshire.html"))
+        records = extract_waiting_times(page, region=REGION)
+
+        for record in records:
+            assert record.source_url == TRUST_URL
+            assert record.page_last_updated == date(2026, 1, 26)
+
+
+class TestLayout2026:
+    """The 2026 layout: holders + captions + n/a cells + new footer."""
+
+    def test_fixture_yields_exactly_the_2026_golden(self, load_fixture, load_golden):
+        page = make_page(load_fixture("trust_page_royal_berkshire_2026.html"))
+        records = extract_waiting_times(page, region=REGION)
+
+        expected = load_golden("royal_berkshire_2026_expected.json")
+        assert [record.to_dict() for record in records] == expected
+
+    def test_na_cells_yield_null_waits_not_absent_records(self, load_fixture):
+        page = make_page(load_fixture("trust_page_royal_berkshire_2026.html"))
+        records = extract_waiting_times(page, region=REGION)
+
+        first_outpatient = [
+            r for r in records if r.metric is Metric.FIRST_OUTPATIENT_APPOINTMENT
+        ]
+        assert len(first_outpatient) == 2
+        assert all(r.average_wait_weeks is None for r in first_outpatient)
 
     def test_unavailable_specialty_skipped(self, load_fixture):
-        records = extract_waiting_times(
-            page(load_fixture("trust_page_royal_berkshire.html")), region="South East"
-        )
+        page = make_page(load_fixture("trust_page_royal_berkshire_2026.html"))
+        records = extract_waiting_times(page, region=REGION)
 
         assert "Paediatric Surgery" not in {r.specialty for r in records}
 
-    def test_footer_date_extracted(self, load_fixture):
-        records = extract_waiting_times(
-            page(load_fixture("trust_page_royal_berkshire.html")), region="South East"
-        )
+    def test_footer_date_parsed(self, load_fixture):
+        page = make_page(load_fixture("trust_page_royal_berkshire_2026.html"))
+        records = extract_waiting_times(page, region=REGION)
 
-        assert all(r.last_updated == "7 August 2026" for r in records)
+        assert all(r.page_last_updated == date(2026, 8, 7) for r in records)
 
 
 class TestEdgeCases:
-    def test_empty_page_yields_nothing(self):
-        assert extract_waiting_times(page("<html><body></body></html>"), "South East") == []
-
-    def test_metric_from_caption(self):
-        html = (
-            "<article><header><h1>Trust X</h1></header>"
-            "<div class='inner_details_holder'><div>"
-            "<h3 class='nhsblue-text0'>ENT - Waiting Times</h3>"
-            "<table class='waiting-times-data'><caption>First Outpatient Appointment</caption>"
-            "<tr><th>Average waiting time for first outpatient appointment</th>"
-            "<td>5 weeks</td></tr>"
-            "<tr><th>8 in 10 patients will be seen within</th><td>9 weeks</td></tr>"
-            "</table></div></div></article>"
+    def test_unavailable_specialty_yields_no_records(self, load_fixture):
+        page = make_page(
+            load_fixture("specialty_unavailable.html"),
+            url="https://www.myplannedcare.nhs.uk/example/",
         )
-        records = extract_waiting_times(page(html), "South East")
+        assert extract_waiting_times(page, region=REGION) == []
 
-        assert len(records) == 1
-        assert records[0].metric == "first_outpatient"
-        assert records[0].average_wait == "5 weeks"
-        assert records[0].percentile_80 == "9 weeks"
+    def test_page_without_provider_heading_yields_no_records(self):
+        html = "<html><body><section class='specialty'><h3>ENT</h3></section></body></html>"
+        page = make_page(html, url="https://www.myplannedcare.nhs.uk/x/")
+        assert extract_waiting_times(page, region=REGION) == []
+
+    def test_header_only_table_yields_record_with_none_waits(self):
+        html = (
+            "<html><body><main><h1>Trust X</h1>"
+            "<section class='specialty'><h3>ENT</h3><h4>Treatment</h4>"
+            "<table><tr><th>Average waiting time</th>"
+            "<th>8 in 10 patients seen within</th></tr></table>"
+            "</section></main></body></html>"
+        )
+        page = make_page(html, url="https://www.myplannedcare.nhs.uk/x/")
+        (record,) = extract_waiting_times(page, region=REGION)
+
+        assert record.average_wait_weeks is None
+        assert record.patients_seen_within_weeks is None
+
+    def test_unknown_metric_heading_is_ignored(self):
+        html = (
+            "<html><body><main><h1>Trust X</h1>"
+            "<section class='specialty'><h3>ENT</h3><h4>Cancelled operations</h4>"
+            "<table><tr><th>Count</th></tr><tr><td>3</td></tr></table>"
+            "</section></main></body></html>"
+        )
+        page = make_page(html, url="https://www.myplannedcare.nhs.uk/x/")
+        assert extract_waiting_times(page, region=REGION) == []
+
+    def test_na_values_parse_as_none(self):
+        html = (
+            "<html><body><main><h1>Trust X</h1>"
+            "<section class='specialty'><h3>ENT</h3>"
+            "<h4>First Outpatient Appointment</h4>"
+            "<table><tr><th>Average waiting time</th>"
+            "<th>8 in 10 patients seen within</th></tr>"
+            "<tr><td>n/a</td><td>6 weeks</td></tr></table>"
+            "</section></main></body></html>"
+        )
+        page = make_page(html, url="https://www.myplannedcare.nhs.uk/x/")
+        (record,) = extract_waiting_times(page, region=REGION)
+
+        assert record.average_wait_weeks is None
+        assert record.patients_seen_within_weeks == 6

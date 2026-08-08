@@ -1,18 +1,28 @@
 <!DOCTYPE html>
-<html>
+<!-- Drifted-layout fixture: the same trust restructured into markup that
+     matches neither the legacy nor the 2026 layout. Tables replaced by
+     divs, headings renamed, both footer formats changed. The pre-flight
+     probe must report every one of these failures. Added 2026-08-08. -->
+<html lang="en">
 <head><title>Royal Berkshire Hospital NHS Foundation Trust</title></head>
 <body>
 <main>
-  <!-- drift: provider heading demoted, holders renamed, captions removed,
-       average-wait header reworded, footer format changed -->
   <h2 class="trust-name">Royal Berkshire Hospital NHS Foundation Trust</h2>
-  <div class="specialty-panel">
-    <h3>Breast - Waiting Times</h3>
-    <div class="wait-cards">
-      <div class="card"><span class="label">Mean wait for treatment</span><span>4 weeks</span></div>
-    </div>
+
+  <div class="wait-card">
+    <span class="spec">Cardiology</span>
+    <div class="metric"><span>Typical wait</span><span>8 weeks</span></div>
+    <div class="metric"><span>Most seen within</span><span>16 weeks</span></div>
   </div>
-  <footer><p>Updated 7 Aug 2026</p></footer>
+
+  <div class="wait-card">
+    <span class="spec">Breast Surgery</span>
+    <div class="metric"><span>Typical wait</span><span>5 weeks</span></div>
+  </div>
+
+  <footer>
+    <p>Last refreshed 26-01-2026</p>
+  </footer>
 </main>
 </body>
 </html>

@@ -1,7 +1,8 @@
 """Offline tests for the pre-flight layout probe and its pipeline wiring.
 
 The drifted fixture proves the probe catches a restructured site; the
-pipeline tests prove drift aborts *before* any crawl call is made.
+pipeline tests prove drift aborts *before* any crawl call is made. Both
+the legacy and the 2026 fixtures must pass the probe.
 """
 
 from __future__ import annotations
@@ -21,10 +22,10 @@ TRUST_URL = "https://www.myplannedcare.nhs.uk/seast/royal-berkshire/"
 
 ALL_FIVE_FAILURES = {
     "no <h1> provider heading found",
-    "no <div class='inner_details_holder'> specialty blocks found",
-    "no recognised waiting-times table captions found",
+    "no recognised specialty blocks found",
+    "no recognised metric labels found",
     "no waiting-time tables with 'Average waiting time' header found",
-    "no 'This page was last updated on ...' footer found",
+    "no recognised last-updated footer found",
 }
 
 
@@ -52,6 +53,14 @@ class TestProbeLayout:
         assert result.ok
         assert result.failures == ()
 
+    def test_2026_fixture_passes(self, load_fixture):
+        result = probe_layout(
+            make_page(load_fixture("trust_page_royal_berkshire_2026.html"))
+        )
+
+        assert result.ok
+        assert result.failures == ()
+
     def test_drifted_fixture_reports_every_failure(self, load_fixture):
         result = probe_layout(make_page(load_fixture("trust_page_drifted.html")))
 
@@ -60,25 +69,23 @@ class TestProbeLayout:
 
     def test_partial_drift_reports_single_failure(self, load_fixture):
         html = load_fixture("trust_page_royal_berkshire.html").replace(
-            "This page was last updated on 7 August 2026", "Updated 7 Aug 2026"
+            "Page last updated: 26/01/2026", "Updated 26 Jan 2026"
         )
         result = probe_layout(make_page(html))
 
         assert not result.ok
-        assert result.failures == ("no 'This page was last updated on ...' footer found",)
+        assert result.failures == ("no recognised last-updated footer found",)
 
     def test_structurally_valid_but_unextractable_page_flagged(self):
-        # Tables and captions present (structural checks pass) but every
-        # cell is n/a, so the extractor yields nothing — end-to-end signal.
+        # Table present (structural check passes) but not a sibling of the
+        # h4, so the extractor yields nothing — the end-to-end signal fires.
         html = (
-            "<html><body><article><header><h1>Trust X</h1></header>"
-            "<div class='inner_details_holder'><div>"
-            "<h3 class='nhsblue-text0'>ENT - Waiting Times</h3>"
-            "<table class='waiting-times-data'><caption>Treatment</caption>"
-            "<tr><th>Average waiting time for treatment</th><td><em>n/a</em></td></tr>"
-            "</table></div></div>"
-            "<ul><li>This page was last updated on 7 August 2026.</li></ul>"
-            "</article></body></html>"
+            "<html><body><main><h1>Trust X</h1>"
+            "<section class='specialty'><h3>ENT</h3><h4>Treatment</h4>"
+            "<div><table><tr><th>Average waiting time</th></tr>"
+            "<tr><td>4 weeks</td></tr></table></div></section>"
+            "<footer><p>Page last updated: 26/01/2026</p></footer>"
+            "</main></body></html>"
         )
         result = probe_layout(make_page(html, url="https://www.myplannedcare.nhs.uk/x/"))
 
@@ -86,6 +93,16 @@ class TestProbeLayout:
         assert result.failures == (
             "extractor produced no records from a structurally valid page",
         )
+
+    def test_unavailable_specialty_page_is_not_a_valid_canary(self, load_fixture):
+        # Documents the operational rule: canaries must be data-bearing pages.
+        result = probe_layout(
+            make_page(
+                load_fixture("specialty_unavailable.html"),
+                url="https://www.myplannedcare.nhs.uk/example/",
+            )
+        )
+        assert not result.ok
 
 
 class TestPipelinePreflight:
@@ -109,6 +126,15 @@ class TestPipelinePreflight:
         expected = load_golden("royal_berkshire_expected.json")
         assert [record.to_dict() for record in result.records] == expected
         assert backend.crawl_calls == [TRUST_URL]
+
+    def test_2026_layout_proceeds_to_2026_golden(self, load_fixture, load_golden):
+        page = make_page(load_fixture("trust_page_royal_berkshire_2026.html"))
+        backend = FakeBackend({TRUST_URL: [page]})
+
+        result = asyncio.run(run_pipeline(backend, [(TRUST_URL, "South East")]))
+
+        expected = load_golden("royal_berkshire_2026_expected.json")
+        assert [record.to_dict() for record in result.records] == expected
 
     def test_preflight_disabled_preserves_lenient_behaviour(self, load_fixture):
         drifted = make_page(load_fixture("trust_page_drifted.html"))
@@ -155,4 +181,4 @@ class TestCliPreflight:
 
         assert exit_code == 0
         assert output.exists()
-        assert "2 records" in capsys.readouterr().out
+        assert "4 records" in capsys.readouterr().out
