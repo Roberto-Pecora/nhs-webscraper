@@ -25,10 +25,16 @@ Seed = tuple[str, str]
 
 @dataclass(frozen=True)
 class PipelineResult:
-    """The outcome of one pipeline execution: provenance plus records."""
+    """The outcome of one pipeline execution: provenance plus records.
+
+    ``failed_pages`` lists page URLs the backend reported as failed
+    (after its own retries) — telemetry, not an error: partial results
+    are kept, but the gaps are now visible.
+    """
 
     run: CrawlRun
     records: list[WaitingTimeRecord]
+    failed_pages: tuple[str, ...] = ()
 
 
 async def run_pipeline(
@@ -47,7 +53,9 @@ async def run_pipeline(
 
     Extraction failures surface as absent records (the extractor's
     contract); backend failures propagate — a failed crawl of a whole
-    region is worth failing loudly.
+    region is worth failing loudly. Per-page failures reported by the
+    backend (via the conventional ``last_failed_pages`` attribute) are
+    collected into the result's telemetry.
     """
     seeds = list(seeds)
     if not seeds:
@@ -63,13 +71,20 @@ async def run_pipeline(
 
     run = CrawlRun(seed_url=seeds[0][0], backend=type(backend).__name__)
     records: list[WaitingTimeRecord] = []
+    failed_pages: list[str] = []
 
     for url, region in seeds:
         pages: Sequence = await backend.crawl(url, options)
         logger.info("crawl of %s returned %d pages", url, len(pages))
+        failed = tuple(getattr(backend, "last_failed_pages", ()))
+        if failed:
+            logger.warning("crawl of %s failed for %d pages: %s", url, len(failed), failed)
+        failed_pages.extend(failed)
         for page in pages:
             records.extend(extract_waiting_times(page, region=region))
 
     normalised = normalise_records(records)
     logger.info("run %s: %d records after normalisation", run.run_id, len(normalised))
-    return PipelineResult(run=run, records=normalised)
+    return PipelineResult(
+        run=run, records=normalised, failed_pages=tuple(failed_pages)
+    )

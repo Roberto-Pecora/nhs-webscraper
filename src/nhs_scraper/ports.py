@@ -30,6 +30,28 @@ class CrawlOptions:
             raise ValueError(f"max_depth must be >= 0, got {self.max_depth}")
 
 
+@dataclass(frozen=True)
+class RetryPolicy:
+    """Retry behaviour for transient crawl failures.
+
+    Backoff is linear (``backoff_seconds * attempt``): polite towards a
+    public NHS site, where aggressive exponential retries are the wrong
+    posture. Validation failures are never retried — only transient
+    transport errors and soft (unsuccessful-result) failures.
+    """
+
+    attempts: int = 3
+    backoff_seconds: float = 2.0
+
+    def __post_init__(self) -> None:
+        if self.attempts < 1:
+            raise ValueError(f"attempts must be >= 1, got {self.attempts}")
+        if self.backoff_seconds < 0:
+            raise ValueError(
+                f"backoff_seconds must be >= 0, got {self.backoff_seconds}"
+            )
+
+
 @runtime_checkable
 class CrawlBackend(Protocol):
     """Async contract every crawl backend must satisfy.
