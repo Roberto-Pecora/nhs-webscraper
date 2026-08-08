@@ -1,42 +1,22 @@
 [
   {
-    "region": "South East",
     "provider": "Royal Berkshire Hospital NHS Foundation Trust",
-    "specialty": "Breast Surgery",
-    "source_url": "https://www.myplannedcare.nhs.uk/seast/royal-berkshire/",
-    "metric": "first_outpatient_appointment",
-    "average_wait_weeks": 2,
-    "patients_seen_within_weeks": 5,
-    "page_last_updated": "2026-01-26"
-  },
-  {
-    "region": "South East",
-    "provider": "Royal Berkshire Hospital NHS Foundation Trust",
-    "specialty": "Breast Surgery",
-    "source_url": "https://www.myplannedcare.nhs.uk/seast/royal-berkshire/",
+    "specialty": "Breast",
     "metric": "treatment",
-    "average_wait_weeks": 5,
-    "patients_seen_within_weeks": 13,
-    "page_last_updated": "2026-01-26"
+    "average_wait": "4 weeks",
+    "percentile_80": "7 weeks",
+    "region": "South East",
+    "source_url": "https://www.myplannedcare.nhs.uk/seast/royal-berkshire/",
+    "last_updated": "7 August 2026"
   },
   {
-    "region": "South East",
     "provider": "Royal Berkshire Hospital NHS Foundation Trust",
     "specialty": "Cardiology",
-    "source_url": "https://www.myplannedcare.nhs.uk/seast/royal-berkshire/",
-    "metric": "first_outpatient_appointment",
-    "average_wait_weeks": 3,
-    "patients_seen_within_weeks": 8,
-    "page_last_updated": "2026-01-26"
-  },
-  {
-    "region": "South East",
-    "provider": "Royal Berkshire Hospital NHS Foundation Trust",
-    "specialty": "Cardiology",
-    "source_url": "https://www.myplannedcare.nhs.uk/seast/royal-berkshire/",
     "metric": "treatment",
-    "average_wait_weeks": 8,
-    "patients_seen_within_weeks": 16,
-    "page_last_updated": "2026-01-26"
+    "average_wait": "8 weeks",
+    "percentile_80": "14 weeks",
+    "region": "South East",
+    "source_url": "https://www.myplannedcare.nhs.uk/seast/royal-berkshire/",
+    "last_updated": "7 August 2026"
   }
 ]
