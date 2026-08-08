@@ -53,7 +53,8 @@ class TestEdgeCases:
             "<div class='inner_details_holder'><div>"
             "<h3 class='nhsblue-text0'>ENT - Waiting Times</h3>"
             "<table class='waiting-times-data'><caption>First Outpatient Appointment</caption>"
-            "<tr><th>Average waiting time for first outpatient appointment</th><td>5 weeks</td></tr>"
+            "<tr><th>Average waiting time for first outpatient appointment</th>"
+            "<td>5 weeks</td></tr>"
             "<tr><th>8 in 10 patients will be seen within</th><td>9 weeks</td></tr>"
             "</table></div></div></article>"
         )
