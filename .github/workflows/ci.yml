@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install package with dev dependencies
+        run: pip install -e .[dev]
+      - name: Lint
+        run: ruff check .
+      - name: Unit and characterisation tests (offline)
+        # Coverage flags (--cov=src --cov-report=term-missing) are
+        # deliberately omitted until Step 2 adds executable code to src/.
+        run: pytest -m "not integration"
+
+  integration-tests:
+    # Opt-in only: requires FIRECRAWL_API_KEY and makes live API calls.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e .[dev]
+      - name: Live integration tests
+        env:
+          FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+        run: pytest -m integration
