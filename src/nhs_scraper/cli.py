@@ -13,6 +13,7 @@ from collections.abc import Sequence
 
 from nhs_scraper.io.csv_handler import read_records_csv, write_records_csv
 from nhs_scraper.pipeline.diff import diff_records, format_change
+from nhs_scraper.pipeline.discover import discover_seeds
 from nhs_scraper.pipeline.preflight import LayoutDriftError
 from nhs_scraper.pipeline.run import run_pipeline
 from nhs_scraper.ports import CrawlBackend, CrawlOptions, RetryPolicy
@@ -55,6 +56,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="URL=REGION",
         help="trust/region seed (repeatable); defaults to a built-in example",
     )
+    parser.add_argument(
+        "--discover",
+        action="store_true",
+        help="enumerate every region/trust seed from the live site "
+        "(full-site run; mutually exclusive with --seed)",
+    )
     parser.add_argument("--output", default="output/my_planned_care.csv")
     parser.add_argument("--limit", type=int, default=100, help="max pages per crawl")
     parser.add_argument("--max-depth", type=int, default=2, help="max crawl depth")
@@ -80,11 +87,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.discover and args.seed:
+        print("--discover and --seed are mutually exclusive")
+        return 1
+
     retry_policy = RetryPolicy(attempts=args.attempts, backoff_seconds=args.backoff)
     backend = build_backend(args.backend, retry_policy=retry_policy)
-    seeds = args.seed or DEFAULT_SEEDS
-    options = CrawlOptions(limit=args.limit, max_depth=args.max_depth)
 
+    if args.discover:
+        try:
+            seeds = asyncio.run(discover_seeds(backend))
+        except Exception as exc:
+            # Never fall back to DEFAULT_SEEDS here: a failed discovery
+            # must not silently degrade a full-site run into a one-trust run.
+            print(f"seed discovery failed: {exc}")
+            return 1
+        print(f"discovered {len(seeds)} trust seeds across the site")
+    else:
+        seeds = args.seed or DEFAULT_SEEDS
+
+    options = CrawlOptions(limit=args.limit, max_depth=args.max_depth)
     try:
         result = asyncio.run(
             run_pipeline(backend, seeds, options, preflight=not args.no_preflight)

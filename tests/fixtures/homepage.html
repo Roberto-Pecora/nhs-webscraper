@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head><title>My Planned Care</title></head>
+<body>
+<header>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/find-my-hospital/">Find my hospital</a>
+    <a href="/my-planned-care/">About</a>
+  </nav>
+</header>
+<main>
+  <h1>My Planned Care</h1>
+  <p>Select your region to find your hospital.</p>
+  <ul class="regions">
+    <li><a href="/east/">East of England</a></li>
+    <li><a href="/london/">London</a></li>
+    <li><a href="/midlands/">Midlands</a></li>
+    <li><a href="/neast/">North East</a></li>
+    <li><a href="/nwest/">North West</a></li>
+    <li><a href="/seast/">South East</a></li>
+    <li><a href="/swest/">South West</a></li>
+  </ul>
+  <!-- traps the parser must reject -->
+  <a href="/london/">London (duplicate)</a>
+  <a href="https://twitter.com/example">External social link</a>
+  <a href="https://other-site.example.com/seast/">External lookalike path</a>
+</main>
+</body>
+</html>
