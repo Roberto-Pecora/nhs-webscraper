@@ -116,9 +116,15 @@ class Crawl4AIBackend:
         """Build the ``FilterChain`` that bounds a deep crawl from ``seed``.
 
         Restricts the crawl to the seed's host — subdomains too when
-        ``options.allow_subdomains`` is set — and excludes PDF links, which
-        the extractor can never use and which otherwise get fetched
-        needlessly (NHS trust sites link out to large PDF documents).
+        ``options.allow_subdomains`` is set — excludes PDF links, which the
+        extractor can never use and which otherwise get fetched needlessly
+        (NHS trust sites link out to large PDF documents), and anchors the
+        crawl to the seed's own URL path so it can't wander into sibling
+        provider pages (e.g. a neighbouring trust) or the region index one
+        level up — every provider on myplannedcare.nhs.uk is a sibling
+        directory, not a descendant, of every other. Matching is on path
+        only (not scheme/host) so it composes correctly with the domain
+        filter above when subdomains are allowed.
         """
         host = urlsplit(seed).hostname or ""
         if options.allow_subdomains:
@@ -126,7 +132,9 @@ class Crawl4AIBackend:
         else:
             domain_filter = _ExactHostFilter(host)
         pdf_filter = URLPatternFilter(patterns=["*.pdf"], reverse=True)
-        return FilterChain(filters=[domain_filter, pdf_filter])
+        seed_path = urlsplit(seed).path
+        seed_scope_filter = URLPatternFilter(patterns=[f"*{seed_path}*"])
+        return FilterChain(filters=[domain_filter, pdf_filter, seed_scope_filter])
 
     async def scrape(self, url: str) -> Page:
         """Fetch a single page and convert it to a domain ``Page``."""

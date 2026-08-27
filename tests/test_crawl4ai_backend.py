@@ -192,3 +192,15 @@ class TestBuildFilterChain:
         assert self._apply_all(chain, "https://www.myplannedcare.nhs.uk/a/")
         assert self._apply_all(chain, "https://api.www.myplannedcare.nhs.uk/a/")
         assert not self._apply_all(chain, "https://www.nhs.uk/conditions/x")
+
+    def test_restricts_to_seed_url_excluding_siblings_and_region_index(self):
+        backend = Crawl4AIBackend(crawler_factory=lambda: FakeCrawler(make_result()))
+        seed = "https://www.myplannedcare.nhs.uk/east/bedford/"
+        chain = backend._build_filter_chain(seed, CrawlOptions())
+
+        assert self._apply_all(chain, seed)
+        assert self._apply_all(chain, seed + "sub-page/")
+        assert not self._apply_all(
+            chain, "https://www.myplannedcare.nhs.uk/east/bedford-spamedica/"
+        )
+        assert not self._apply_all(chain, "https://www.myplannedcare.nhs.uk/east/")
