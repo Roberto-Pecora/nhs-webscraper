@@ -67,6 +67,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=100, help="max pages per crawl")
     parser.add_argument("--max-depth", type=int, default=2, help="max crawl depth")
     parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=8,
+        help="max seeds crawled concurrently (default: 8)",
+    )
+    parser.add_argument(
         "--attempts",
         type=int,
         default=3,
@@ -111,7 +117,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         seeds = args.seed or DEFAULT_SEEDS
 
-    options = CrawlOptions(limit=args.limit, max_depth=args.max_depth)
+    options = CrawlOptions(limit=args.limit, max_depth=args.max_depth, concurrency=args.concurrency)
     try:
         result = asyncio.run(
             run_pipeline(backend, seeds, options, preflight=not args.no_preflight)
