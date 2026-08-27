@@ -124,13 +124,19 @@ class TestCrawl:
         )
 
         assert [p.url for p in pages] == [r.url for r in results]
-        assert stubbed_crawl4ai["strategy_kwargs"] == {"max_depth": 3, "max_pages": 25}
+        strategy_kwargs = stubbed_crawl4ai["strategy_kwargs"]
+        assert strategy_kwargs["max_depth"] == 3
+        assert strategy_kwargs["max_pages"] == 25
+        assert strategy_kwargs["filter_chain"] is not None
 
     def test_default_options_when_none(self, stubbed_crawl4ai):
         backend = Crawl4AIBackend(crawler_factory=lambda: FakeCrawler([make_result()]))
         asyncio.run(backend.crawl("https://www.myplannedcare.nhs.uk/"))
 
-        assert stubbed_crawl4ai["strategy_kwargs"] == {"max_depth": 2, "max_pages": 100}
+        strategy_kwargs = stubbed_crawl4ai["strategy_kwargs"]
+        assert strategy_kwargs["max_depth"] == 2
+        assert strategy_kwargs["max_pages"] == 100
+        assert strategy_kwargs["filter_chain"] is not None
 
     def test_unsuccessful_results_are_skipped(self, stubbed_crawl4ai):
         results = [
@@ -145,3 +151,44 @@ class TestCrawl:
             "https://www.myplannedcare.nhs.uk/a/",
             "https://www.myplannedcare.nhs.uk/c/",
         ]
+
+
+class TestBuildFilterChain:
+    """``_build_filter_chain`` bounds the deep crawl to the seed's host and
+    excludes PDFs, so a full-site crawl can no longer wander into unrelated
+    NHS domains or fetch large binary documents the extractor can't use.
+    """
+
+    def _apply_all(self, filter_chain, url: str) -> bool:
+        return all(f.apply(url) for f in filter_chain.filters)
+
+    def test_excludes_pdf_links(self):
+        backend = Crawl4AIBackend(crawler_factory=lambda: FakeCrawler(make_result()))
+        chain = backend._build_filter_chain(
+            "https://www.myplannedcare.nhs.uk/", CrawlOptions()
+        )
+
+        assert not self._apply_all(
+            chain, "https://www.myplannedcare.nhs.uk/wp-content/uploads/report.pdf"
+        )
+        assert self._apply_all(chain, "https://www.myplannedcare.nhs.uk/about/")
+
+    def test_restricts_to_exact_host_by_default(self):
+        backend = Crawl4AIBackend(crawler_factory=lambda: FakeCrawler(make_result()))
+        chain = backend._build_filter_chain(
+            "https://www.myplannedcare.nhs.uk/", CrawlOptions(allow_subdomains=False)
+        )
+
+        assert self._apply_all(chain, "https://www.myplannedcare.nhs.uk/a/")
+        assert not self._apply_all(chain, "https://other.myplannedcare.nhs.uk/a/")
+        assert not self._apply_all(chain, "https://www.nhs.uk/conditions/x")
+
+    def test_permits_subdomains_when_allowed(self):
+        backend = Crawl4AIBackend(crawler_factory=lambda: FakeCrawler(make_result()))
+        chain = backend._build_filter_chain(
+            "https://www.myplannedcare.nhs.uk/", CrawlOptions(allow_subdomains=True)
+        )
+
+        assert self._apply_all(chain, "https://www.myplannedcare.nhs.uk/a/")
+        assert self._apply_all(chain, "https://api.www.myplannedcare.nhs.uk/a/")
+        assert not self._apply_all(chain, "https://www.nhs.uk/conditions/x")

@@ -7,8 +7,20 @@
   <p>Select the Hospital you have been referred to.</p>
   <ul class="trusts">
     <li><a href="/seast/royal-berkshire/">Royal Berkshire NHS Foundation Trust</a></li>
-    <li><a href="https://www.myplannedcare.nhs.uk/seast/oxford-university/">Oxford University Hospitals</a></li>
+    <li><a href="https://www.myplannedcare.nhs.uk/seast/oxford-university/">Oxford University Hospitals NHS Foundation Trust</a></li>
   </ul>
+  <!-- independent/private providers the filter must reject -->
+  <li><a href="/seast/portsmouth-spamedica/">Portsmouth &#8211; Spamedica</a></li>
+  <li><a href="/seast/wessex-nuffield/">Wessex &#8211; Nuffield</a></li>
+  <li><a href="/seast/runnymede-circle/">The Runnymede Hospital &#8211; Circle</a></li>
+  <!-- exact slugs observed leaking through in a real --discover run
+       against the live South East region page; regression coverage for
+       that specific report, in addition to the general cases above -->
+  <li><a href="/seast/ashtead-hospital-ramsay/">Ashtead Hospital &#8211; Ramsay</a></li>
+  <li><a href="/seast/alexandra-hospital-spire/">Alexandra Hospital &#8211; Spire</a></li>
+  <li><a href="/seast/benenden-hospital/">Benenden Hospital</a></li>
+  <li><a href="/seast/basingstoke-chec/">Basingstoke &#8211; CHEC</a></li>
+  <li><a href="/seast/berkshire-independent-hospital-ramsay/">Berkshire Independent Hospital &#8211; Ramsay</a></li>
   <!-- traps the parser must reject -->
   <a href="/seast/royal-berkshire/">Royal Berkshire (duplicate)</a>
   <a href="/seast/">Back to region (self link)</a>

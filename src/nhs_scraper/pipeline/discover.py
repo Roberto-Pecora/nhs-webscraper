@@ -6,17 +6,32 @@ page once for trust links, producing the ``(url, region)`` seed pairs
 ``run_pipeline`` already consumes — so a full-site run needs no
 hand-maintained seed list.
 
+Region pages list both genuine NHS trusts and independent/private
+providers (Nuffield, Spire, Spamedica, Circle, Ramsay, CHEC, Optegra,
+Newmedica, ACES, Practice Plus Group, ...) as sibling links one path
+level below the region URL, with no DOM-level distinction between the
+two groups. ``discover_trust_seeds`` filters to NHS trusts only, using
+the one signal verified with zero exceptions against the live site: a
+genuine trust's visible link text always ends in "NHS Trust" or "NHS
+Foundation Trust"; independent providers instead follow a "Location -
+Brand" pattern. Skipping independent providers keeps a full-site crawl
+from fetching several times more pages than the NHS waiting-time data
+actually requires.
+
 Both parsers are pure functions over HTML strings; only
 ``discover_seeds`` touches the backend.
 """
 
 from __future__ import annotations
 
+import logging
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
 from nhs_scraper.ports import CrawlBackend
+
+logger = logging.getLogger(__name__)
 
 #: Default entry point for discovery.
 BASE_URL = "https://www.myplannedcare.nhs.uk/"
@@ -37,6 +52,13 @@ REGION_SLUG_TO_NAME: dict[str, str] = {
     "swest": "South West",
 }
 
+#: Visible link-text suffixes that mark a genuine NHS trust, verified with
+#: zero exceptions against the live South East and London region pages.
+#: Independent/private providers (Nuffield, Spire, Spamedica, Circle,
+#: Ramsay, CHEC, Optegra, Newmedica, ACES, Practice Plus Group, ...) use a
+#: "Location - Brand" link text instead and never match this suffix.
+_NHS_TRUST_SUFFIXES = ("NHS Trust", "NHS Foundation Trust")
+
 
 def _normalise(url: str) -> str:
     """Normalise to a trailing-slash URL so dedupe and prefix checks hold."""
@@ -47,13 +69,34 @@ def _path_segments(url: str) -> list[str]:
     return [part for part in urlparse(url).path.split("/") if part]
 
 
-def _iter_urls(html: str, base_url: str):
-    """Yield absolute, same-host, normalised URLs from every anchor."""
+def _iter_anchors(html: str, base_url: str):
+    """Yield ``(url, link_text)`` for every same-host anchor on the page.
+
+    Hrefs are stripped of surrounding whitespace (including stray
+    non-breaking spaces the live site has been observed to emit) before
+    resolution. An href that is empty after stripping is skipped and
+    logged rather than yielded — a single malformed anchor on an
+    otherwise-good page is a data-quality blip, not the systemic layout
+    drift ``run_pipeline``'s preflight probe exists to catch loudly; the
+    aggregate emptiness checks in ``discover_seeds`` still raise if a
+    whole page yields nothing usable. ``link_text`` is likewise stripped,
+    since ``discover_trust_seeds`` matches an exact trailing suffix on it.
+    """
     soup = BeautifulSoup(html, "html.parser")
     for anchor in soup.find_all("a", href=True):
-        url = _normalise(urljoin(base_url, anchor["href"]))
+        href = anchor["href"].strip()
+        if not href:
+            logger.debug("skipping anchor with empty/whitespace-only href on %s", base_url)
+            continue
+        url = _normalise(urljoin(base_url, href))
         if urlparse(url).netloc == urlparse(base_url).netloc:
-            yield url
+            yield url, anchor.get_text().strip()
+
+
+def _iter_urls(html: str, base_url: str):
+    """Yield absolute, same-host, normalised URLs from every anchor."""
+    for url, _text in _iter_anchors(html, base_url):
+        yield url
 
 
 def discover_region_urls(html: str, base_url: str = BASE_URL) -> list[str]:
@@ -68,29 +111,55 @@ def discover_region_urls(html: str, base_url: str = BASE_URL) -> list[str]:
     return urls
 
 
+def _is_nhs_trust_link(link_text: str) -> bool:
+    """True if a candidate provider link's visible text names an NHS trust.
+
+    Independent/private providers (Nuffield, Spire, Spamedica, Circle,
+    Ramsay, CHEC, Optegra, Newmedica, ACES, Practice Plus Group, ...) use a
+    "Location - Brand" link text with no such suffix, verified against the
+    live site with zero exceptions.
+    """
+    return link_text.endswith(_NHS_TRUST_SUFFIXES)
+
+
 def discover_trust_seeds(
     region_url: str, html: str, base_url: str = BASE_URL
 ) -> list[tuple[str, str]]:
     """Extract ``(trust_url, region)`` seeds from a region page.
 
-    A trust link is exactly one path level below the region URL — this
-    excludes self links, specialty pages (two levels down) and links to
-    other regions' trusts.
+    A candidate provider link is exactly one path level below the region
+    URL — this excludes self links, specialty pages (two levels down) and
+    links to other regions' providers. Region pages list independent/
+    private providers alongside genuine NHS trusts with no DOM-level
+    distinction, so candidates are additionally filtered to those whose
+    visible link text ends in "NHS Trust" or "NHS Foundation Trust" —
+    see ``_is_nhs_trust_link``.
     """
     region_url = _normalise(region_url)
     slug = _path_segments(region_url)[0]
     region_name = REGION_SLUG_TO_NAME.get(slug, slug)
     seeds: list[tuple[str, str]] = []
     seen: set[str] = set()
-    for url in _iter_urls(html, region_url):
-        if (
+    candidate_count = 0
+    for url, link_text in _iter_anchors(html, region_url):
+        if not (
             url != region_url
             and url.startswith(region_url)
             and len(_path_segments(url)) == 2
             and url not in seen
         ):
-            seen.add(url)
+            continue
+        seen.add(url)
+        candidate_count += 1
+        if _is_nhs_trust_link(link_text):
             seeds.append((url, region_name))
+
+    logger.info(
+        "%s: %d candidate provider links, %d kept as NHS trusts",
+        region_url,
+        candidate_count,
+        len(seeds),
+    )
     return seeds
 
 

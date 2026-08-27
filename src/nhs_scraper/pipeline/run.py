@@ -6,11 +6,12 @@ driven by Crawl4AI in production and by an in-memory fake in tests.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from nhs_scraper.domain import CrawlRun, WaitingTimeRecord
+from nhs_scraper.domain import CrawlRun, Page, WaitingTimeRecord
 from nhs_scraper.pipeline.extract import extract_waiting_times
 from nhs_scraper.pipeline.normalise import normalise_records
 from nhs_scraper.pipeline.preflight import LayoutDriftError, probe_layout
@@ -70,21 +71,52 @@ async def run_pipeline(
         logger.info("preflight probe passed for %s", canary_url)
 
     run = CrawlRun(seed_url=seeds[0][0], backend=type(backend).__name__)
+    concurrency = (options or CrawlOptions()).concurrency
+    semaphore = asyncio.Semaphore(concurrency)
+
+    seed_results = await asyncio.gather(
+        *(_crawl_seed(backend, semaphore, url, region, options) for url, region in seeds)
+    )
+
     records: list[WaitingTimeRecord] = []
     failed_pages: list[str] = []
-
-    for url, region in seeds:
-        pages: Sequence = await backend.crawl(url, options)
-        logger.info("crawl of %s returned %d pages", url, len(pages))
-        failed = tuple(getattr(backend, "last_failed_pages", ()))
-        if failed:
-            logger.warning("crawl of %s failed for %d pages: %s", url, len(failed), failed)
+    for failed, seed_records in seed_results:
         failed_pages.extend(failed)
-        for page in pages:
-            records.extend(extract_waiting_times(page, region=region))
+        records.extend(seed_records)
 
     normalised = normalise_records(records)
     logger.info("run %s: %d records after normalisation", run.run_id, len(normalised))
     return PipelineResult(
         run=run, records=normalised, failed_pages=tuple(failed_pages)
     )
+
+
+async def _crawl_seed(
+    backend: CrawlBackend,
+    semaphore: asyncio.Semaphore,
+    url: str,
+    region: str,
+    options: CrawlOptions | None,
+) -> tuple[tuple[str, ...], list[WaitingTimeRecord]]:
+    """Crawl one seed and extract its records, bounded by ``semaphore``.
+
+    ``last_failed_pages`` is read off the backend the instant its own
+    ``crawl`` call returns — with no ``await`` in between — so a
+    concurrently-running seed's later write can't be observed here first.
+    Asyncio only switches tasks at ``await`` points, so this read is safe
+    even when several seeds share one backend instance.
+    """
+    async with semaphore:
+        pages: Sequence[Page] = await backend.crawl(url, options)
+        failed = tuple(getattr(backend, "last_failed_pages", ()))
+
+    logger.info("crawl of %s returned %d pages", url, len(pages))
+    if failed:
+        logger.warning("crawl of %s failed for %d pages: %s", url, len(failed), failed)
+
+    records = [
+        record
+        for page in pages
+        for record in extract_waiting_times(page, region=region)
+    ]
+    return failed, records

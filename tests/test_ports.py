@@ -61,6 +61,7 @@ class TestCrawlOptions:
         assert options.limit == 100
         assert options.max_depth == 2
         assert options.allow_subdomains is False
+        assert options.concurrency == 8
 
     @pytest.mark.parametrize("limit", [0, -1])
     def test_invalid_limit_rejected(self, limit):
@@ -70,3 +71,8 @@ class TestCrawlOptions:
     def test_negative_max_depth_rejected(self):
         with pytest.raises(ValueError, match="max_depth"):
             CrawlOptions(max_depth=-1)
+
+    @pytest.mark.parametrize("concurrency", [0, -1])
+    def test_invalid_concurrency_rejected(self, concurrency):
+        with pytest.raises(ValueError, match="concurrency"):
+            CrawlOptions(concurrency=concurrency)

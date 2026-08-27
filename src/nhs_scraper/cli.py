@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 from collections.abc import Sequence
 
 from nhs_scraper.io.csv_handler import read_records_csv, write_records_csv
@@ -86,6 +87,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # Without this, INFO-level logs from discover.py/run.py (e.g. the
+    # per-region "kept as NHS trusts" line) never reach stdout in a real
+    # run — the loggers exist but nothing has configured a handler/level.
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     args = parse_args(argv)
     if args.discover and args.seed:
         print("--discover and --seed are mutually exclusive")

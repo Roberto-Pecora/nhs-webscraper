@@ -22,12 +22,21 @@ class CrawlOptions:
     limit: int = 100
     max_depth: int = 2
     allow_subdomains: bool = False
+    concurrency: int = 8
+    """Max number of seeds crawled concurrently by ``run_pipeline``.
+
+    Bounded rather than unbounded so a full-site ``--discover`` run (100+
+    trusts) doesn't hammer the live NHS site or exceed the backend's own
+    connection pool. 8 is a conservative default for a public site.
+    """
 
     def __post_init__(self) -> None:
         if self.limit < 1:
             raise ValueError(f"limit must be >= 1, got {self.limit}")
         if self.max_depth < 0:
             raise ValueError(f"max_depth must be >= 0, got {self.max_depth}")
+        if self.concurrency < 1:
+            raise ValueError(f"concurrency must be >= 1, got {self.concurrency}")
 
 
 @dataclass(frozen=True)

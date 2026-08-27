@@ -94,3 +94,78 @@ class TestSeedHandling:
             )
         )
         assert result.records == []
+
+
+class ConcurrencyTrackingBackend:
+    """Fake backend that proves seeds overlap in flight and stays bounded.
+
+    ``crawl`` yields control (``asyncio.sleep``) mid-call so overlapping
+    seeds actually interleave under a real event loop — a purely
+    sequential loop would never show ``max_in_flight > 1`` here. It also
+    mimics ``Crawl4AIBackend``: ``last_failed_pages`` is set on ``self``
+    *after* an ``await`` (the same shape as the real backend's
+    ``async with ... __aexit__`` gap before the attribute write), so a
+    test reading it too late would observe another seed's value.
+    """
+
+    def __init__(self, failures_by_seed: dict[str, tuple[str, ...]]):
+        self._failures_by_seed = failures_by_seed
+        self.last_failed_pages: tuple[str, ...] = ()
+        self.in_flight = 0
+        self.max_in_flight = 0
+        self.call_count = 0
+
+    async def scrape(self, url: str) -> Page:
+        return Page(url=url, html="<html></html>")
+
+    async def crawl(self, seed: str, options: CrawlOptions | None = None) -> list[Page]:
+        self.call_count += 1
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        await asyncio.sleep(0.01)  # let other seeds' crawl() interleave
+        self.in_flight -= 1
+        self.last_failed_pages = self._failures_by_seed.get(seed, ())
+        return [Page(url=seed, html="<html></html>")]
+
+
+class TestConcurrentSeeds:
+    def test_seeds_run_concurrently_not_sequentially(self):
+        seeds = [(f"https://www.myplannedcare.nhs.uk/x{i}/", "London") for i in range(6)]
+        backend = ConcurrencyTrackingBackend({})
+
+        asyncio.run(
+            run_pipeline(backend, seeds, CrawlOptions(concurrency=6), preflight=False)
+        )
+
+        # A sequential loop can never have more than one crawl() in flight;
+        # this fails if someone reverts to the plain `for` loop.
+        assert backend.max_in_flight > 1
+        assert backend.call_count == len(seeds)
+
+    def test_concurrency_is_bounded_by_options(self):
+        seeds = [(f"https://www.myplannedcare.nhs.uk/x{i}/", "London") for i in range(10)]
+        backend = ConcurrencyTrackingBackend({})
+
+        asyncio.run(
+            run_pipeline(backend, seeds, CrawlOptions(concurrency=3), preflight=False)
+        )
+
+        assert backend.max_in_flight <= 3
+        assert backend.call_count == len(seeds)
+
+    def test_failed_pages_collected_completely_across_concurrent_seeds(self):
+        urls = [f"https://www.myplannedcare.nhs.uk/x{i}/" for i in range(5)]
+        seeds = [(url, "London") for url in urls]
+        # Every seed reports its own distinct failed page: a naive
+        # "read backend.last_failed_pages once after gather" approach
+        # would only see the last seed's value and drop the rest.
+        failures_by_seed = {url: (f"{url}broken-page/",) for url in urls}
+        backend = ConcurrencyTrackingBackend(failures_by_seed)
+
+        result = asyncio.run(
+            run_pipeline(backend, seeds, CrawlOptions(concurrency=5), preflight=False)
+        )
+
+        expected = {f"{url}broken-page/" for url in urls}
+        assert set(result.failed_pages) == expected
+        assert len(result.failed_pages) == len(urls)

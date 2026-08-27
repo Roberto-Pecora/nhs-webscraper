@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
+from urllib.parse import urlsplit
 
 from nhs_scraper.domain import Page
 from nhs_scraper.ports import CrawlOptions, RetryPolicy
@@ -20,14 +21,35 @@ from nhs_scraper.ports import CrawlOptions, RetryPolicy
 try:  # pragma: no cover - the real import is exercised by integration tests
     from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
     from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
+    from crawl4ai.deep_crawling.filters import DomainFilter, FilterChain, URLPatternFilter
 except ImportError:  # pragma: no cover
     AsyncWebCrawler = None  # type: ignore[assignment]
     CrawlerRunConfig = None  # type: ignore[assignment]
     BFSDeepCrawlStrategy = None  # type: ignore[assignment]
+    DomainFilter = None  # type: ignore[assignment]
+    FilterChain = None  # type: ignore[assignment]
+    URLPatternFilter = None  # type: ignore[assignment]
 
 
 class CrawlError(RuntimeError):
     """Raised when Crawl4AI reports an unsuccessful scrape."""
+
+
+class _ExactHostFilter:
+    """Restricts a deep crawl to one exact host — no subdomains.
+
+    Crawl4AI's own ``DomainFilter`` always treats an allowed domain as also
+    matching its subdomains, so it can't express "this host only" on its
+    own. This is a plain, duck-typed filter (``FilterChain`` only requires
+    an ``apply(url) -> bool`` method) rather than a subclass of a Crawl4AI
+    filter, so it doesn't depend on or override any library internals.
+    """
+
+    def __init__(self, host: str) -> None:
+        self._host = host.lower()
+
+    def apply(self, url: str) -> bool:
+        return urlsplit(url).hostname == self._host
 
 
 class Crawl4AIBackend:
@@ -90,6 +112,22 @@ class Crawl4AIBackend:
 
         raise last_error  # type: ignore[misc]
 
+    def _build_filter_chain(self, seed: str, options: CrawlOptions) -> Any:
+        """Build the ``FilterChain`` that bounds a deep crawl from ``seed``.
+
+        Restricts the crawl to the seed's host — subdomains too when
+        ``options.allow_subdomains`` is set — and excludes PDF links, which
+        the extractor can never use and which otherwise get fetched
+        needlessly (NHS trust sites link out to large PDF documents).
+        """
+        host = urlsplit(seed).hostname or ""
+        if options.allow_subdomains:
+            domain_filter: Any = DomainFilter(allowed_domains=host)
+        else:
+            domain_filter = _ExactHostFilter(host)
+        pdf_filter = URLPatternFilter(patterns=["*.pdf"], reverse=True)
+        return FilterChain(filters=[domain_filter, pdf_filter])
+
     async def scrape(self, url: str) -> Page:
         """Fetch a single page and convert it to a domain ``Page``."""
         async with self._crawler_factory() as crawler:
@@ -110,6 +148,7 @@ class Crawl4AIBackend:
             deep_crawl_strategy=BFSDeepCrawlStrategy(
                 max_depth=options.max_depth,
                 max_pages=options.limit,
+                filter_chain=self._build_filter_chain(seed, options),
             )
         )
         async with self._crawler_factory() as crawler:
